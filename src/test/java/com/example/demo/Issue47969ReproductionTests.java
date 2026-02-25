@@ -1,0 +1,99 @@
+package com.example.demo;
+
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@SpringBootTest(properties = {
+		"management.metrics.data.repository.autotime.enabled=true",
+		"management.observations.annotations.enabled=true"
+})
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class Issue47969ReproductionTests {
+
+	@Autowired
+	private Issue47969NoteRepository noteRepository;
+
+	@Autowired
+	private Issue47969ObservedService observedService;
+
+	@Autowired
+	private MeterRegistry meterRegistry;
+
+	@Autowired
+	private ObservationRegistry observationRegistry;
+
+	private final RecordingObservationHandler observationHandler = new RecordingObservationHandler();
+
+	@BeforeAll
+	void registerObservationHandler() {
+		this.observationRegistry.observationConfig().observationHandler(this.observationHandler);
+	}
+
+	@BeforeEach
+	void setUp() {
+		this.noteRepository.deleteAll();
+		clearRepositoryInvocationMeters();
+		this.observationHandler.clear();
+	}
+
+	@Test
+	void observedOnServiceCreatesObservation() {
+		this.observedService.invoke();
+
+		assertThat(this.observationHandler.observationNames()).contains("issue.47969.service");
+	}
+
+	@Test
+	void observedOnRepositoryDoesNotCreateObservationButMetricIsRecorded() {
+		assertThat(this.meterRegistry.find("spring.data.repository.invocations").timers()).isEmpty();
+
+		this.noteRepository.findAll();
+
+		assertThat(this.meterRegistry.find("spring.data.repository.invocations").timers()).isNotEmpty();
+		assertThat(this.observationHandler.observationNames()).doesNotContain("issue.47969.repository");
+	}
+
+	private void clearRepositoryInvocationMeters() {
+		List<Meter> repositoryMeters = List.copyOf(this.meterRegistry.find("spring.data.repository.invocations").meters());
+		repositoryMeters.forEach(this.meterRegistry::remove);
+	}
+
+	private static class RecordingObservationHandler implements ObservationHandler<Observation.Context> {
+
+		private final List<String> observationNames = new CopyOnWriteArrayList<>();
+
+		@Override
+		public void onStart(Observation.Context context) {
+			this.observationNames.add(context.getName());
+		}
+
+		@Override
+		public boolean supportsContext(Observation.Context context) {
+			return true;
+		}
+
+		void clear() {
+			this.observationNames.clear();
+		}
+
+		List<String> observationNames() {
+			return this.observationNames;
+		}
+
+	}
+
+}
