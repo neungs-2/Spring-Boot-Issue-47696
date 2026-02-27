@@ -61,17 +61,17 @@ class Issue47969ReproductionTests {
 	}
 
 	@Test
-	void observedOnRepositoryDoesNotCreateObservationButMetricIsRecorded() {
+	void observedOnRepositoryCreatesObservationAndMetricIsRecorded() {
 		assertThat(this.meterRegistry.find("spring.data.repository.invocations").timers()).isEmpty();
 
 		this.noteRepository.findAll();
 
 		assertThat(this.meterRegistry.find("spring.data.repository.invocations").timers()).isNotEmpty();
-		assertThat(this.observationHandler.observationNames()).doesNotContain("issue.47969.repository");
+		assertThat(this.observationHandler.observationNames()).contains("issue.47969.repository");
 	}
 
 	@Test
-	void observedOnRepositoryDurationIsMuchSmallerThanRepositoryMetricDuration() {
+	void observedOnRepositoryDurationIsInSimilarRangeToRepositoryMetricDuration() {
 		int iterations = 300;
 		for (int i = 0; i < iterations; i++) {
 			this.noteRepository.findAll();
@@ -84,13 +84,11 @@ class Issue47969ReproductionTests {
 			.mapToLong((timer) -> (long) timer.totalTime(TimeUnit.NANOSECONDS))
 			.sum();
 		long observedDurationNanos = this.observationHandler.totalDurationNanos("issue.47969.repository");
-		System.out.println(
-				"metricDurationNanos=" + metricDurationNanos + ", observedDurationNanos=" + observedDurationNanos);
+		System.out.println("metricDurationNanos=" + metricDurationNanos + ", observedDurationNanos=" + observedDurationNanos);
 
 		assertThat(this.observationHandler.observationNames()).contains("issue.47969.repository");
-		assertThat(metricDurationNanos).isPositive();
-		assertThat(observedDurationNanos).isPositive();
-		assertThat(metricDurationNanos).isGreaterThan(observedDurationNanos * 10);
+		double ratio = (double) metricDurationNanos / (double) observedDurationNanos;
+		assertThat(ratio).isBetween(0.5d, 5d);
 	}
 
 	private void clearRepositoryInvocationMeters() {
